@@ -2,6 +2,7 @@
 
 """Reinforcement-learning based best-response policies."""
 
+import logging
 from numpy import array, float32
 from random import Random
 import tensorflow as tf
@@ -11,16 +12,8 @@ from test import test_model, test_attack_action
 
 from keras.models import Sequential
 from keras.layers import Dense
-from keras.wrappers.scikit_learn import KerasRegressor
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import KFold
-from sklearn import linear_model
-
-import numpy
-import math
 
 EPSILON = 0.000001 # small value (for floating-point imprecision)
-cross_validatoin = True
 
 def normalized(vect):
   """
@@ -37,7 +30,7 @@ class QLearning:
   States are represented as lists of arbitrary floats, while actions are represented as normalized lists of floats (i.e., floats are greater than or equal to zero and sum up to one).
   Differences compared to Q-learning are described in the documentation of the relevant functions.
   """
-  BEST_ACTION_ITERATIONS = 16 # small value because querying the neural network is very slow in the current implementation
+  BEST_ACTION_ITERATIONS = 100 # small value because querying the neural network is very slow in the current implementation
   LEARN_INITIAL_ITERATIONS = 131072
   LEARN_ITERATIONS = 131072
   DISCOUNT = 0.5
@@ -50,8 +43,6 @@ class QLearning:
     """
     self.state_size = state_size
     self.action_size = action_size
-    features = tf.contrib.layers.real_valued_column("state_action", dimension=(state_size + action_size))
-    self.estimator = tf.estimator.DNNRegressor([64, 32], [features], label_dimension=1)
     self.regressor = Sequential()
     self.regressor.add(Dense(64, input_dim=state_size + action_size, kernel_initializer='normal', activation='relu'))
     self.regressor.add(Dense(32, kernel_initializer='normal', activation='relu'))
@@ -70,13 +61,9 @@ class QLearning:
     assert(len(action) == self.action_size)
     assert(abs(sum(action) - 1) < EPSILON)
     assert(min(action) >= 0)
-    input_fn = tf.contrib.learn.io.numpy_input_fn({"state_action": array([state + action], dtype=float32)}, shuffle=False)
-    X_test = array([state + action])
-    Y_test = self.regressor.predict(X_test)
-    for y in Y_test:
-      return y[0]
-    #for output in self.estimator.predict(input_fn):
-    #  return output['predictions'][0]
+    output = self.regressor.predict(array([state + action]))
+    for value in output:
+      return value[0]
   
   def best_action(self, state):
     """
@@ -96,7 +83,7 @@ class QLearning:
           value = changed
         else:
           action[j] -= 1
-    print("N: ", state, "unnormalized action: ", action) # output for debugging
+    logging.debug("N: {}, action (unnormalized): {}".format(state, action))
     return normalized(action)
     
   def update(self, state_action_value):
@@ -113,21 +100,9 @@ class QLearning:
       assert(min(action) >= 0)
       input_data.append(state + action)
       output_data.append(value)
-    input_fn = tf.contrib.learn.io.numpy_input_fn({"state_action": array(input_data, dtype=float32)}, array(output_data, dtype=float32), num_epochs=None, shuffle=False)
-    X_train = array(input_data, dtype=float32)
-    Y_train = array(output_data, dtype=float32)  
-    self.regressor.fit(X_train, Y_train, epochs=1000, batch_size=500)
-
-    #Y_predict = self.regressor.predict(X_train)
-    #error = 0
-    #for j in range(0, len(Y_train)):
-    #    error += (Y_train[j] - float(Y_predict[j][0]))**2
-    #rmse = math.sqrt(error/len(Y_train))
-    #print(rmse)  
-    
-    #for j in range(0, len(Y_predict)):
-    #    print(Y_train[j], Y_predict[j])  
-    #self.estimator.train(input_fn=input_fn, steps=QLearning.LEARN_INITIAL_ITERATIONS)
+    input_train = array(input_data, dtype=float32)
+    output_train = array(output_data, dtype=float32)  
+    self.regressor.fit(input_train, output_train, epochs=10, batch_size=500)
     
   def learn(self, initial_state, state_observe, state_update, rnd=Random(0)):
     """
@@ -146,9 +121,8 @@ class QLearning:
       (next_state, loss) = state_update(state, action)
       state_action_value.append((state_observe(state), action, loss))
       state = next_state
-      #print(loss)
     self.update(state_action_value)
-    print("First phase completed!!!!!!!")
+    logging.info("First phase completed.")
     # second phase (consider value of next state)
     state = initial_state
     state_action_value = []
@@ -160,7 +134,7 @@ class QLearning:
       state_action_value.append((state_observe(state), action, value))
       state = next_state
     self.update(state_action_value)
-    print("Second phase completed")
+    logging.info("Second phase completed.")
 
 def flatten_lists(lists):
   """
@@ -208,6 +182,7 @@ class DefenderBestResponse:
             state_update)
             
 if __name__ == "__main__":
+  logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
   model = test_model()
   DefenderBestResponse(model, test_attack_action)
 
