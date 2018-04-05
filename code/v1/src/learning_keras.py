@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 """Reinforcement-learning based best-response policies."""
-
 import logging
 from numpy import array, float32
 from random import Random
@@ -12,6 +11,8 @@ from keras.layers import Dense
 
 from model import Model
 from test import test_model, test_attack_action
+
+import itertools    
 
 EPSILON = 0.000001 # small value (for floating-point imprecision)
 
@@ -73,17 +74,38 @@ class QLearning:
     :return: List of values of the actions in the given states (i.e., Q(state, action)).
     """
     inputs = []
-    for (state, action) in state_action:
-      assert(len(state) == self.state_size)
-      assert(len(action) == self.action_size)
-      assert(abs(sum(action) - 1) < EPSILON)
-      assert(min(action) >= 0)
-      inputs.append(state + action)
-    output = self.regressor.predict(array(inputs))
-    values = []
-    for value in output:
-      values.append(value[0])
-    assert(len(state_action) == len(values))
+    #start_time = time()
+    #for (state, action) in state_action:
+    #  assert(len(state) == self.state_size)
+    #  assert(len(action) == self.action_size)
+    #  assert(abs(sum(action) - 1) < EPSILON)
+    #  assert(min(action) >= 0)
+    #  inputs.append(state + action)
+    #duration = time() - start_time
+    #logging.info("Append to input list (b2): {}".format(duration))  
+
+    start_time = time()
+    inputs = list(map(list,map(itertools.chain.from_iterable, state_action)))
+    duration = time() - start_time
+    logging.info("Map to input list list (b2): {}".format(duration)) 
+
+    start_time = time()
+    output = self.regressor.predict(array(inputs), batch_size=len(inputs))
+    duration = time() - start_time
+    logging.info("Predict in batch (b3): {}".format(duration))
+    
+    #values = []
+    #start_time = time()
+    #for value in output:
+    #  values.append(value[0])
+    #duration = time() - start_time
+    #logging.info("Flatten duration (b4): {}".format(duration))  
+    #assert(len(state_action) == len(values))
+
+    start_time = time()
+    values = output.flatten()
+    duration = time() - start_time
+    logging.info("Flatten duration (b4): {}".format(duration))     
     return values
   
   def best_action(self, state):
@@ -118,6 +140,7 @@ class QLearning:
     best_values = [float("inf") for s in range(len(states))]        
     for i in range(QLearning.BEST_ACTION_ITERATIONS):  
       logging.debug("best_action_batch (iteration: {})".format(i)) 
+      start_time = time()
       state_action = []
       changed_actions = []  
       for s in range(len(states)):        
@@ -135,7 +158,9 @@ class QLearning:
             best_values[s] = values[j]
             best_actions[s] = changed_actions[j]
           j += 1         
-      assert(j == len(state_action))        
+      assert(j == len(state_action))
+      duration = time() - start_time
+      logging.info("Execution time for this iteration: {}".format(duration))        
     return [(normalized(best_actions[s]), best_values[s]) for s in range(len(states))]
     
   def update(self, state_action_value):
@@ -177,20 +202,23 @@ class QLearning:
     self.update(state_action_value)
     duration = time() - start_time
     logging.info("First phase completed.")
-    logging.info("Training duration: {}".format(duration))
+    logging.info("Training duration (a): {}".format(duration))
     
     # temporary code for performance measurement
-#    start_time = time()
-#    state_action = []
-#    for i in range(10000):
-#      action = normalized([rnd.random() for i in range(self.action_size)])
-#      state = normalized([rnd.random() for i in range(self.state_size)])
-#      state_action.append((state, action))
-#      self.Q(state, action)
-#    self.Q_batch(state_action)
-#    duration = time() - start_time
-#    logging.info("Test duration: {}".format(duration))
-        
+    start_time = time()
+    state_action = []
+    for i in range(10000):
+      action = normalized([rnd.random() for i in range(self.action_size)])
+      state = normalized([rnd.random() for i in range(self.state_size)])
+      state_action.append((state, action))
+      self.Q(state, action)
+    duration = time() - start_time
+    logging.info("Generating 10000 (action, state) duration (b1): {}".format(duration))
+    start_time = time()
+    self.Q_batch(state_action)
+    duration = time() - start_time
+    logging.info("Q_batch duration (b2+b3+b4): {}".format(duration))
+    
     # second phase (consider value of next state)
     state = initial_state
     state_action_loss = []
@@ -210,6 +238,7 @@ class QLearning:
       state_action_value.append((state, action, value))
     self.update(state_action_value)
     logging.info("Second phase completed.")
+   
 
 def flatten_lists(lists):
   """
@@ -260,4 +289,3 @@ if __name__ == "__main__":
   logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
   model = test_model()
   DefenderBestResponse(model, test_attack_action)
-
