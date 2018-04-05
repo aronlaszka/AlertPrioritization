@@ -5,13 +5,13 @@
 import logging
 from numpy import array, float32
 from random import Random
-import tensorflow as tf
-
-from model import Model
-from test import test_model, test_attack_action
+from time import time
 
 from keras.models import Sequential
 from keras.layers import Dense
+
+from model import Model
+from test import test_model, test_attack_action
 
 EPSILON = 0.000001 # small value (for floating-point imprecision)
 
@@ -121,8 +121,21 @@ class QLearning:
       (next_state, loss) = state_update(state, action)
       state_action_value.append((state_observe(state), action, loss))
       state = next_state
+    start_time = time()
     self.update(state_action_value)
+    duration = time() - start_time
     logging.info("First phase completed.")
+    logging.info("Training duration: {}".format(duration))
+    
+    # temporary code for performance measurement
+    start_time = time()
+    for i in range(10000):
+      action = normalized([rnd.random() for i in range(self.action_size)])
+      state = normalized([rnd.random() for i in range(self.state_size)])
+      self.Q(state, action)
+    duration = time() - start_time
+    logging.info("Test duration: {}".format(duration))
+    
     # second phase (consider value of next state)
     state = initial_state
     state_action_value = []
