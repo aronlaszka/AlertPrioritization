@@ -177,7 +177,7 @@ class Model:
     for a in range(len(self.attack_types)):
       for h in range(1, self.horizon):
         if (state.M[h-1][a] == 1) and (
-            rnd.random() < product([1 - state.R[h-1][a][t] * delta[h-1][t] / state.N[h-1][t] for t in range(len(self.alert_types))])):
+            rnd.random() < product([1 - state.R[h-1][a][t] * delta[h-1][t] / max(state.N[h-1][t], 1) for t in range(len(self.alert_types))])):
           next.M[h][a] = 1
         else:
           next.M[h][a] = 0
@@ -189,6 +189,7 @@ class Model:
           next.R[h][a][t] = state.R[h-1][a][t]
     # 4. Attacks
     pr_attacks = alpha(self, state)
+    assert(self.is_feasible_attack(pr_attacks))
     for a in range(len(self.attack_types)):
       if rnd.random() < pr_attacks[a]:
         next.M[0][a] = 1
