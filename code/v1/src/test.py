@@ -26,7 +26,11 @@ def test_defense_action(model, state):
   budget = model.def_budget / (model.horizon * len(model.alert_types))
   delta = []
   for h in range(model.horizon):
-    delta.append([min(int(budget / model.alert_types[t].cost), state.N[h][t]) for t in range(len(model.alert_types))])
+    #delta.append([min(int(budget / model.alert_types[t].cost), state.N[h][t]) for t in range(len(model.alert_types))])
+    if h == 0:
+      delta.append([min(model.def_budget, state.N[h][0]), 0])
+    else:
+      delta.append([0,0])
   return delta
   
 def test_attack_action(model, state):
