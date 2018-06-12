@@ -125,7 +125,25 @@ class Model:
     for a in range(len(self.attack_types)):
       cost += self.attack_types[a].cost * alpha[a]
     return cost <= self.adv_budget
-    
+
+  def make_attack_feasible(self, alpha):
+    """
+    Compute an attack action that is feasible and resembles the given attack action.
+    :param alpha: Attack action (see function is_feasible_attack).
+    :return: Feasible attack action.
+    """    
+    assert(len(alpha) == len(self.attack_types))
+    cost = 0.0
+    for a in range(len(self.attack_types)):
+      cost += self.attack_types[a].cost * alpha[a]
+    if cost == 0:
+      return alpha
+    factor = self.adv_budget / cost
+    alpha_feasible = []
+    for a in range(len(self.attack_types)):
+      alpha_feasible.append(max(alpha[a] * factor - 0.00000001, 0))
+    return alpha_feasible    
+
   class State:
     """State of the game in a certain time step."""
     def __init__(self, model, N=None, M=None, R=None, U=None):
@@ -169,6 +187,10 @@ class Model:
     :param rnd: Random number generator.
     :return: Next state (i.e., Model.State object).
     """
+    if isinstance(delta, list):
+      delta = delta
+    else:
+      delta = delta(self, state)
     assert(self.is_feasible_investigation(state.N, delta))
     if rnd is None:
       rnd = self.rnd
@@ -177,30 +199,38 @@ class Model:
     for a in range(len(self.attack_types)):
       for h in range(1, self.horizon):
         if (state.M[h-1][a] == 1) and (
-            rnd.random() < product([1 - state.R[h-1][a][t] * delta[h-1][t] / max(state.N[h-1][t], 1) for t in range(len(self.alert_types))])):
+            #rnd.random() < product([1 - state.R[h-1][a][t] * delta[h-1][t] / state.N[h-1][t] for t in range(len(self.alert_types))])):
+            rnd.random() < product([1 - state.R[h-1][a][t] * delta[h-1][t] / max(state.N[h-1][t], 1) for t in range(len(self.alert_types))])):        
           next.M[h][a] = 1
         else:
           next.M[h][a] = 0
+
     # 2. and 3. Aging of alerts and true alerts
     for t in range(len(self.alert_types)):
       for h in range(1, self.horizon):
         next.N[h][t] = state.N[h-1][t] - delta[h-1][t]
         for a in range(len(self.attack_types)):
           next.R[h][a][t] = state.R[h-1][a][t]
+
     # 4. Attacks
-    pr_attacks = alpha(self, state)
+    if isinstance(alpha, list):
+      pr_attacks = alpha
+    else:
+      pr_attacks = alpha(self, state)
     assert(self.is_feasible_attack(pr_attacks))
     for a in range(len(self.attack_types)):
       if rnd.random() < pr_attacks[a]:
         next.M[0][a] = 1
       else:
         next.M[0][a] = 0
+
     # 5. Losses
     next.U = state.U + sum((
                sum((
                  self.attack_types[a].loss[h] * next.M[h][a] 
                for h in range(self.horizon))) 
              for a in range(len(self.attack_types))))
+
     # 6. True alerts
     for a in range(len(self.attack_types)):
       for t in range(len(self.alert_types)):
@@ -208,8 +238,9 @@ class Model:
           next.R[0][a][t] = 1
         else:
           next.R[0][a][t] = 0
+
     # 7. Alerts
     for t in range(len(self.alert_types)):
-      next.N[0][t] = self.alert_types[t].false_alerts.generate() + sum((next.R[0][a][t] for a in range(len(self.attack_types))))    
+      next.N[0][t] = self.alert_types[t].false_alerts.generate() + sum((next.R[0][a][t] for a in range(len(self.attack_types))))
     return next
 
