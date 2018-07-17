@@ -22,8 +22,8 @@ import matplotlib.pyplot as plt
 import pickle
 #####################  hyper parameters  ####################
 
-MAX_EPISODES = 150
-MAX_EP_STEPS = 1000
+MAX_EPISODES = 1000#200
+MAX_EP_STEPS = 100#1000
 LR_A = 0.001    # learning rate for actor
 LR_C = 0.002    # learning rate for critic
 GAMMA = 0.9     # reward discount
@@ -33,8 +33,6 @@ BATCH_SIZE = int(0.3*MEMORY_CAPACITY) # only 30% data of the memory are seleted 
 
 TEST_EPISODES = 150
 MAX_TEST_STEPS = 1000
-
-ITERATION = 3 # iterations to compute best response
 
 class DDPGbase(object):
     def __init__(self, a_dim, s_dim,):
@@ -176,7 +174,7 @@ class DDPGlearning:
         """
         logging.info("DDPG training starts.")
 
-        # generate random states for state initilization in each eposide        
+        # Generate random states for state initilization in each eposide        
         states = []
         global_state = initial_state
         states.append(global_state)
@@ -189,7 +187,7 @@ class DDPGlearning:
             states.append(next_global_state)
             global_state = next_global_state
 
-        # ddpg training process
+        # DDPG training process
         epsilon = 0.0
         epsilon_max = 1.0
         t1 = time.time()
@@ -218,7 +216,7 @@ class DDPGlearning:
                 reward = -1.0*loss
                 self.ddpg.store_transition(state, action, reward, next_state)
 
-                if self.ddpg.pointer > MEMORY_CAPACITY and j <= 300:
+                if self.ddpg.pointer > MEMORY_CAPACITY and (j+1) % 5 == 0:
                     self.ddpg.learn()
 
                 global_state = next_global_state
@@ -231,12 +229,13 @@ class DDPGlearning:
                     #print('Episode:', i, ' Reward: %i' % int(total_reward), 'Explore: %.5f' % epsilon, )
                     ave_reward = total_reward/MAX_EP_STEPS
                     #logging.info("Episode {}, Average reward in each step {}".format(i, ave_reward))
-                    if len(exploit_reward) == 0:
-                        logging.info("Episode {}, Ave reward {}, Ave exploitation reward unavailable".format(i, ave_reward))
-                    else:
-                        logging.info("Episode {}, Ave reward {}, Ave exploitation reward {}".format(i, ave_reward, sum(exploit_reward)/len(exploit_reward)))
+                    if (i+1) % 100 == 0:
+                        if len(exploit_reward) == 0:
+                            logging.info("Episode {}, Ave reward {}, Ave exploitation reward unavailable".format(i, ave_reward))
+                        else:
+                            logging.info("Episode {}, Ave reward {}, Ave exploitation reward {}".format(i, ave_reward, sum(exploit_reward)/len(exploit_reward)))
                     rewards.append(ave_reward)
-                    epsilon = epsilon+0.01 if epsilon < epsilon_max else epsilon_max
+                    epsilon = epsilon+0.002 if epsilon < epsilon_max else epsilon_max
                     break
          
         logging.info("DDPG test starts.")
@@ -248,8 +247,7 @@ class DDPGlearning:
             for j in range(MAX_TEST_STEPS):
                 # Choose the best action by the actor network
                 action = self.ddpg.choose_action(state)
-                #action = np.array([0.25,0.25,0.25,0.25,0,0,0,0,0,0,0,0], dtype=np.float32)
-                #action = np.array([0.08,0.08,0.08,0.08,0.08,0.08,0.08,0.08,0.08,0.08,0.08,0.08], dtype=np.float32)
+                #action = np.array([0.16,0.16,0.16,0.16,0.16,0.16], dtype=np.float32)
                 (next_global_state, loss) = state_update(global_state, list(action))
                 next_state = np.array(state_observe(next_global_state), dtype=np.float32)
                 global_state = next_global_state
@@ -262,7 +260,108 @@ class DDPGlearning:
         if TEST_EPISODES != 0:
             ave_reward = total_reward/TEST_EPISODES
             logging.info("Average reward in each step {}".format(ave_reward))
-    
+
+    def learn_from_mix(self, initial_state, state_observe, state_update, op_profile, op_strategy, rnd=Random(0)):
+        """
+        Q-learning based algorithm for learning the best actions in every state against mixed strategy of the opponent.
+        Note that due to performance reasons, the state-value function (i.e., Q) is not updated after every self.step, but only in batches.
+        :param initial_state: Initial state, represented as an arbitrary object (note that this can be of a different format than the states used in other functions of QLearning).
+        :param state_observe: Observes the state. Function, takes either initial_state or a state output by state_update, returns a list of floats (of length state_size).
+        :param state_update: Updates the state based on an action. Function, takes a state (see state_observe), an action (normalized list of floats) and oppoent's action sampled from its mixed strategy, return the next state (may be arbitrary object).
+        :param op_profile: List, action profile of the opponent.
+        :param op_strategy: List, mixed strategy of the opponent.
+        :param rnd: Random number generator.
+        """
+        logging.info("DDPG training starts.")
+
+        # generate random states for state initilization in each eposide                
+        states = []
+        global_state = initial_state
+        states.append(global_state)
+        op_actions = np.random.choice(op_profile, MEMORY_CAPACITY, p=op_strategy)
+        for i in range(MEMORY_CAPACITY):
+            if self.mode == "defend":
+                action = normalized([rnd.random() for i in range(self.action_size)])
+            else:
+                action = [rnd.random() for i in range(self.action_size)]
+            (next_global_state, loss) = state_update(global_state, action, op_actions[i])
+            states.append(next_global_state)
+            global_state = next_global_state
+
+        # DDPG training process
+        epsilon = 0.0
+        epsilon_max = 1.0
+        t1 = time.time()
+        rewards = []
+        op_actions = np.random.choice(op_profile, MAX_EPISODES, p=op_strategy)
+        for i in range(MAX_EPISODES):
+            global_state = random.choice(states)
+            state = np.array(state_observe(global_state),dtype=np.float32)
+            total_reward = 0.0
+            exploit_reward = []
+            exploit_flag = True
+            op_action = op_actions[i]
+            for j in range(MAX_EP_STEPS):
+                # epsilon-greedy
+                if np.random.uniform() < epsilon:
+                    exploit_flag = True
+                    action = self.ddpg.choose_action(state) #action has been normalized by choos_action()
+                else:
+                    exploit_flag = False
+                    if self.mode == "defend":
+                        action = normalized([rnd.random() for i in range(self.action_size)])
+                    else:
+                        action = [rnd.random() for i in range(self.action_size)]
+                    action = np.array(action)
+
+                (next_global_state, loss) = state_update(global_state, list(action), op_action)
+                next_state = np.array(state_observe(next_global_state), dtype=np.float32)
+                reward = -1.0*loss
+                self.ddpg.store_transition(state, action, reward, next_state)
+
+                if self.ddpg.pointer > MEMORY_CAPACITY and (j+1) % 5 == 0:
+                    self.ddpg.learn()
+
+                global_state = next_global_state
+                state = next_state
+                total_reward += reward
+                if exploit_flag:
+                    exploit_reward.append(reward)
+
+                if j == MAX_EP_STEPS-1:
+                    #print('Episode:', i, ' Reward: %i' % int(total_reward), 'Explore: %.5f' % epsilon, )
+                    ave_reward = total_reward/MAX_EP_STEPS
+                    #logging.info("Episode {}, Average reward in each step {}".format(i, ave_reward))
+                    if (i+1) % 100 == 0:
+                        if len(exploit_reward) == 0:
+                            logging.info("Episode {}, Ave reward {}, Ave exploitation reward unavailable".format(i, ave_reward))
+                        else:
+                            
+                            logging.info("Episode {}, Ave reward {}, Ave exploitation reward {}".format(i, ave_reward, sum(exploit_reward)/len(exploit_reward)))
+                    rewards.append(ave_reward)
+                    epsilon = epsilon+0.002 if epsilon < epsilon_max else epsilon_max
+                    break                                
+
+    def policy(self, model, state):
+        """
+        Get the action given by the state
+        :param model: Model of the alert prioritization problem (i.e., Model object).
+        :param state: State of the alert prioritization problem (i.e., Model.State object).(one-dimensional list) given a model and a state.
+        :retuen: the action based on the policy
+        """        
+        feasible_action = None
+        if self.mode == "defend":
+            state_array = np.array(flatten_lists(state.N),dtype=np.float32)
+            action = list(self.ddpg.choose_action(state_array))
+            delta = model.make_investigation_feasible(state.N, unflatten_list(action, len(model.alert_types)))
+            feasible_action = delta 
+        else:
+            state_array = np.array(flatten_state(state),dtype=np.float32)
+            action = list(self.ddpg.choose_action(state_array))
+            alpha = model.make_attack_feasible(action)            
+            feasible_action = alpha
+        return feasible_action
+
 class DefenderBestResponse:
     """Best-response investigation policy for the defender."""
     def __init__(self, model, alpha):
@@ -289,13 +388,43 @@ class DefenderBestResponse:
                         state_update)
         tf.reset_default_graph()
 
+class DefendMixedAttack:
+    """Best-response investigation policy for the defender against mix strategy of the attacker."""
+    def __init__(self, model, attack_profile, attack_strategy):
+        """
+        Construct a best-response object using QLearning.
+        :param model: Model of the alert prioritization problem (i.e., Model object).
+        :param attack_profile: List of attack policies.
+        :param attack_strategy: List of probablities of choosing policy from the attack profile 
+        """
+        self.mode = "defend"
+        self.agent = DDPGlearning(self.mode, len(model.alert_types) * model.horizon, len(model.alert_types) * model.horizon)
+        def state_update(state, action, alpha):
+            """
+            State update function for QLearning.learn.
+            :param state: State of the alert prioritization problem (i.e., Model.State object).
+            :param action: Action represented as a normalized list of floats.
+            :param alpha: Attack policy sampled from the attack_profile.
+            :return: Next state (i.e., Model.State object).
+            """
+            delta = model.make_investigation_feasible(state.N, unflatten_list(action, len(model.alert_types))) # make_investigation_feasible ``unnormalizes'' the action
+            next_state = model.next_state(state, delta, alpha)
+            loss = next_state.U - state.U
+            return (next_state, loss)
+        self.agent.learn_from_mix(Model.State(model),
+                                 lambda state: flatten_lists(state.N),
+                                 state_update,
+                                 attack_profile,
+                                 attack_strategy)
+        tf.reset_default_graph()
+
 class AttackerBestResponse:
     """Best-response attack policy for the attacker."""
     def __init__(self, model, delta):   
         """
         Construct a best-response object using QLearning.
         :param model: Model of the alert prioritization problem (i.e., Model object).
-        :param delta: Defence policy. Function, takes a model and a state, returns the portion of budget allocated for each type of alerts with all ages given a model and a state.
+        :param delta: defense policy. Function, takes a model and a state, returns the portion of budget allocated for each type of alerts with all ages given a model and a state.
         """
         self.mode = "attack"
         state_size = model.horizon*(len(model.alert_types) + len(model.attack_types) + len(model.alert_types) * len(model.attack_types))
@@ -317,29 +446,45 @@ class AttackerBestResponse:
                         state_update)
         tf.reset_default_graph()
 
+class AttackMixedDefense:
+    """Best-response attack policy for the attacker against mixed strategy of defender."""
+    def __init__(self, model, defense_profile, defense_strategy):
+        """
+        Construct a best-response object using QLearning.
+        :param model: Model of the alert prioritization problem (i.e., Model object).
+        :param defense_profile: List of defense policies.
+        :param defense_strategy: List of probablities of choosing policy from the defense profile 
+        """       
+        self.mode = "attack"
+        state_size = model.horizon*(len(model.alert_types) + len(model.attack_types) + len(model.alert_types) * len(model.attack_types))
+        action_size = len(model.attack_types)
+        self.agent = DDPGlearning(self.mode, state_size, action_size)
+        def state_update(state, action, delta):
+            """
+            State update function for QLearning.learn.
+            :param state: State of the alert prioritization problem (i.e., Model.State object).
+            :param action: Action represented as a normalized list of floats.
+            :param delta: defense policy sampled from the defense_profile.
+            :return: Next state (i.e., Model.State object).
+            """
+            alpha = model.make_attack_feasible(action)      
+            next_state = model.next_state(state, delta, alpha)
+            loss = -1.0 * (next_state.U - state.U)
+            return (next_state, loss)                        
+        self.agent.learn_from_mix(Model.State(model),
+                        lambda state: flatten_state(state),                        
+                        state_update,
+                        defense_profile,
+                        defense_strategy)
+        tf.reset_default_graph()            
+
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
     model = test_model()
-    ddpg_attack_action = None
-    ddpg_defense_action = None
-    def ddpg_defense_action(model, state):
-        state_array = np.array(flatten_lists(state.N),dtype=np.float32)
-        action = list(defender.agent.ddpg.choose_action(state_array))
-        delta = model.make_investigation_feasible(state.N, unflatten_list(action, len(model.alert_types)))
-        return delta
-    def ddpg_attack_action(model, state):
-        state_array = np.array(flatten_state(state),dtype=np.float32)
-        action = list(attacker.agent.ddpg.choose_action(state_array))
-        alpha = model.make_attack_feasible(action)
-        return alpha
-    defender = DefenderBestResponse(model, test_attack_action)
-    """
-    for i in range(ITERATION):
-        print("Training defender")
-        if i == 0:
-            defender = DefenderBestResponse(model, test_attack_action)
-        else:
-            defender = DefenderBestResponse(model, ddpg_attack_action)
-        print("Training attacker")
-        attacker = AttackerBestResponse(model, ddpg_defense_action)     
-    """
+    attack_profile = [test_attack_action, test_attack_action]
+    attack_strategy = [0.6, 0.4]
+    defense_profile = [test_defense_action, test_defense_action]
+    defense_strategy = [0.4, 0.6]
+    #DefendMixedAttack(model, attack_profile, attack_strategy)
+    AttackerBestResponse(model, test_defense_action)
+    AttackMixedDefense(model, defense_profile, defense_strategy)
