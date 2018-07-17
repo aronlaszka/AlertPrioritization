@@ -9,15 +9,20 @@ def test_model():
   Create a very simple test instance of the model (H = 3, |T| = 2, |A| = 2).
   :return: Model object.
   """
+  #alert_types =  [AlertType(1, PoissonDistribution(100), "t1"), 
+  #                AlertType(1, PoissonDistribution(100), "t2"),
+  #                AlertType(1, PoissonDistribution(70), "t3"),
+  #                AlertType(1, PoissonDistribution(90), "t4")]  
+  #attack_types = [AttackType([0, 0.8, 1.4], 100, [0.2, 0.9, 0.1, 0.7], "a1"),
+  #                AttackType([0, 0.6, 1.0], 100, [0.1, 0.7, 0.6, 0.5], "a2"),
+  #                AttackType([0, 0.7, 0.9], 100, [0.8, 0.1, 0.5, 0.5], "a3"),
+  #                AttackType([0, 0.5, 0.8], 100, [0.6, 0.2, 0.7, 0.5], "a4")]
+  
   alert_types =  [AlertType(1, PoissonDistribution(100), "t1"), 
-                  AlertType(1, PoissonDistribution(100), "t2"),
-                  AlertType(1, PoissonDistribution(70), "t3"),
-                  AlertType(1, PoissonDistribution(90), "t4")]  
-  attack_types = [AttackType([0, 0.8, 1.4], 100, [0.2, 0.9, 0.1, 0.7], "a1"),
-                  AttackType([0, 0.6, 1.0], 100, [0.1, 0.7, 0.6, 0.5], "a2"),
-                  AttackType([0, 0.7, 0.9], 100, [0.8, 0.1, 0.5, 0.5], "a3"),
-                  AttackType([0, 0.5, 0.8], 100, [0.6, 0.2, 0.7, 0.5], "a4")]
-  model = Model(3, alert_types, attack_types, 200, 200)
+                  AlertType(1, PoissonDistribution(80), "t2")]
+  attack_types = [AttackType([0, 0.8, 1.4], 100, [0.2, 0.9], "a1"),
+                  AttackType([0, 0.6, 1.0], 100, [0.6, 0.4], "a2")]                    
+  model = Model(3, alert_types, attack_types, 100, 100)
   return model
   
 def test_defense_action(model, state):
@@ -28,13 +33,31 @@ def test_defense_action(model, state):
   :return: Number of alerts to investigate. Two-dimensional array, delta[h][t] is the number of alerts to investigate of type t raised h time steps ago.
   """
   budget = model.def_budget / (model.horizon * len(model.alert_types))
+  budget_for_newest = model.def_budget / len(model.alert_types) # We distribute the budget to the newest alerts
   delta = []
   for h in range(model.horizon):
-    #delta.append([min(int(budget / model.alert_types[t].cost), state.N[h][t]) for t in range(len(model.alert_types))])
+    delta.append([min(int(budget / model.alert_types[t].cost), state.N[h][t]) for t in range(len(model.alert_types))])
+    #if h == 0:
+      #delta.append([min(int(budget_for_newest / model.alert_types[t].cost), state.N[h][t]) for t in range(len(model.alert_types))])
+      #delta.append([min(int(model.def_budget), state.N[h][0]), 0])
+    #else:
+      #delta.append([0 for t in range(len(model.alert_types))])
+  return delta
+
+def test_defense_newest(model, state):
+  """
+  Compute a basic investigation action (i.e., number of alerts to investigate), which distributes the defender's budget uniformly among newest alert.
+  :param model: Model of the alert prioritization problem (i.e., Model object).
+  :param state: State of the alert prioritization problem (i.e., Model.State object).
+  :return: Number of alerts to investigate. Two-dimensional array, delta[h][t] is the number of alerts to investigate of type t raised h time steps ago.
+  """
+  budget_for_newest = model.def_budget / len(model.alert_types) # We distribute the budget to the newest alerts
+  delta = []
+  for h in range(model.horizon):
     if h == 0:
-      delta.append([min(model.def_budget, state.N[h][0]), 0])
+      delta.append([min(int(budget_for_newest / model.alert_types[t].cost), state.N[h][t]) for t in range(len(model.alert_types))])
     else:
-      delta.append([0,0])
+      delta.append([0 for t in range(len(model.alert_types))])
   return delta
   
 def test_attack_action(model, state):
