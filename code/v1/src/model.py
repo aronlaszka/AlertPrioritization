@@ -6,6 +6,8 @@ from numpy.random import poisson
 from numpy import product
 from random import Random
 
+EPSILON = 0.00000001
+
 class PoissonDistribution:
   """Poisson distribution with fixed mean."""
   def __init__(self, lam=100):
@@ -141,7 +143,7 @@ class Model:
     factor = self.adv_budget / cost
     alpha_feasible = []
     for a in range(len(self.attack_types)):
-      alpha_feasible.append(max(alpha[a] * factor - 0.00000001, 0))
+      alpha_feasible.append(max(alpha[a] * factor - EPSILON, 0))
     return alpha_feasible    
 
   class State:
