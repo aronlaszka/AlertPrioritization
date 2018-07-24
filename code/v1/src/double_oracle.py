@@ -64,23 +64,16 @@ def get_payoff_mixed(model, states, attack_profile, defense_profile, attack_stra
     initial_state = Model.State(model)
 
     for i in range(MAX_EPISODES):
-        #state = random.choice(states)
-        #state = states[i]
         state = initial_state
         episode_reward = 0.0
         defense_policy = defense_policies[i]
         attack_policy = attack_policies[i]
         for j in range(MAX_STEPS):
-            #attack_policy = np.random.choice(attack_profile, 1, p=attack_strategy)[0]
-            #defense_policy = np.random.choice(defense_profile, 1, p=defense_strategy)[0]
-
             next_state = model.next_state(state, defense_policy, attack_policy)
             loss = next_state.U - state.U
             state = next_state
             step_reward = -1.0*loss
             episode_reward += GAMMA**j*step_reward
-
-        #print(i, episode_reward)
         total_discount_reward += episode_reward
     ave_discount_reward = total_discount_reward/MAX_EPISODES
     return ave_discount_reward
@@ -94,22 +87,7 @@ def get_payoff(model, states, attack_policy, defense_policy):
     :param defense_policy: Function, takes a model and a state, returns the portion of budget allocated for each type of alerts with all ages given a model and a state.
     :return: The expected discounted reward. 
     """
-    #ave_discount_reward = get_payoff_mixed(model, states, [attack_policy], [defense_policy], [1.0], [1.0])	
-    total_discount_reward = 0
-    initial_state = Model.State(model)  
-    for i in range(MAX_EPISODES):
-        #state = random.choice(states)
-        state = initial_state
-        episode_reward = 0.0
-        for j in range(MAX_STEPS):
-            next_state = model.next_state(state, defense_policy, attack_policy)
-            loss = next_state.U - state.U
-            state = next_state
-            step_reward = -1.0*loss
-            episode_reward += GAMMA**j*step_reward
-        #print(i, episode_reward)
-        total_discount_reward += episode_reward
-    ave_discount_reward = total_discount_reward/MAX_EPISODES
+    ave_discount_reward = get_payoff_mixed(model, states, [attack_policy], [defense_policy], [1.0], [1.0])	
     return ave_discount_reward
 
 def update_profile(model, states, payoff, attack_profile, 
@@ -238,7 +216,6 @@ def double_oracle(model, initial_mode):
         print("The expected defender utility when defender deviates from NE and uniformly distributes the budget among newest alerts:")
         print(utility_defender_newest)
 
-        #utility_attacker_uniform = get_payoff_mixed(model, states, [test_attack_action], defense_profile, [1.0], defense_strategy)
         utility_attacker_uniform = np.dot(payoff[:,0], defense_strategy)
         print("The expected attacker utility when attacker deviates and uniformly distributes the budget among all attack types. ")
         print(utility_attacker_uniform)
@@ -254,12 +231,10 @@ def double_oracle(model, initial_mode):
         payoff, attack_profile, defense_profile = update_profile(model, states, payoff, attack_profile, defense_profile, attack_policy, defense_policy)
 
         # Test the terminate condition
-        #attack_pure_utility = -1*get_payoff_mixed(model, states, [attack_response.agent.policy], defense_profile, [1.0], defense_strategy)
-        #defense_pure_utility = get_payoff_mixed(model, states, attack_profile, [defense_response.agent.policy], attack_strategy, [1.0])
         attack_pure_utility = -1*np.dot(payoff[:,i+initial_action_size][0:(len(payoff[:,i+initial_action_size])-1)], defense_strategy)
         defense_pure_utility = np.dot(payoff[i+initial_action_size][0:(len(payoff[i+initial_action_size])-1)], attack_strategy)
-        print("The utility of pure attack:", attack_pure_utility)
-        print("The utility of pure defense:", defense_pure_utility)
+        print("The utility of attacker retuened by oracle:", attack_pure_utility)
+        print("The utility of defender returned by oracle:", defense_pure_utility)
         if -1*utility >= attack_pure_utility and utility >= defense_pure_utility:
             print("No pure strategy found, terminate")
             break
