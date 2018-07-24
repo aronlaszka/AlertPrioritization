@@ -7,7 +7,7 @@ from random import Random
 from time import time
 
 from model import Model
-from test import test_model, test_attack_action, test_defense_action
+from test import test_model1, test_model2,test_model3, test_attack_action, test_defense_action, test_defense_newest
 from listutils import *
 
 from keras.models import Sequential
@@ -20,19 +20,26 @@ import time
 import random
 import matplotlib.pyplot as plt
 import pickle
+
 #####################  hyper parameters  ####################
 
-MAX_EPISODES = 1000#200
-MAX_EP_STEPS = 100#1000
+MAX_EPISODES = 500#200
+MAX_EP_STEPS = 200#1000
 LR_A = 0.001    # learning rate for actor
 LR_C = 0.002    # learning rate for critic
 GAMMA = 0.9     # reward discount
 TAU = 0.01      # soft replacement
 MEMORY_CAPACITY = 25000
-BATCH_SIZE = int(0.3*MEMORY_CAPACITY) # only 30% data of the memory are seleted as mini-batch
+BATCH_SIZE = 128#int(0.01*MEMORY_CAPACITY) # only 30% data of the memory are seleted as mini-batch
+EPSILON_STEP = 0.005 # the increamemtal step of epsilon
+LEARNING_STEP = 2 # steps that ddpg learns
+EPSILON_DISCOUNT = 0.99
 
-TEST_EPISODES = 150
-MAX_TEST_STEPS = 1000
+TEST_EPISODES = 500#150
+MAX_TEST_STEPS = 200
+
+attacker_ind = 0
+defender_ind = 0
 
 class DDPGbase(object):
     def __init__(self, a_dim, s_dim,):
@@ -102,45 +109,45 @@ class DDPGdefend(DDPGbase):
     def _build_a(self, s, reuse=None, custom_getter=None):
         trainable = True if reuse is None else False
         with tf.variable_scope('Actor', reuse=reuse, custom_getter=custom_getter):
-            h1 = tf.layers.dense(s, 128, activation=tf.nn.tanh, name='l1', trainable=trainable)
-            h2 = tf.layers.dense(h1, 64, activation=tf.nn.tanh, name='l2', trainable=trainable)
-            h3 = tf.layers.dense(h2, 64, activation=tf.nn.tanh, name='l3', trainable=trainable)
+            h1 = tf.layers.dense(s, 256, activation=tf.nn.tanh, name='l1', trainable=trainable)
+            h2 = tf.layers.dense(h1, 256, activation=tf.nn.tanh, name='l2', trainable=trainable)
+            h3 = tf.layers.dense(h2, 256, activation=tf.nn.tanh, name='l3', trainable=trainable)
             a = tf.layers.dense(h3, self.a_dim, activation=tf.nn.softmax, name='a', trainable=trainable)
             return a
 
     def _build_c(self, s, a, reuse=None, custom_getter=None):
         trainable = True if reuse is None else False
         with tf.variable_scope('Critic', reuse=reuse, custom_getter=custom_getter):
-            n_l1 = 128
+            n_l1 = 256
             w1_s = tf.get_variable('w1_s', [self.s_dim, n_l1], trainable=trainable)
             w1_a = tf.get_variable('w1_a', [self.a_dim, n_l1], trainable=trainable)
             b1 = tf.get_variable('b1', [1, n_l1], trainable=trainable)
             net1 = tf.nn.relu(tf.matmul(s, w1_s) + tf.matmul(a, w1_a) + b1)
-            net2 = tf.layers.dense(net1, 64, activation=tf.nn.relu, trainable=trainable)
-            net3 = tf.layers.dense(net2, 64, activation=tf.nn.relu, trainable=trainable)
+            net2 = tf.layers.dense(net1, 256, activation=tf.nn.relu, trainable=trainable)
+            net3 = tf.layers.dense(net2, 256, activation=tf.nn.relu, trainable=trainable)
             return tf.layers.dense(net3, 1, trainable=trainable)  # Q(s,a)
 
 class DDPGattack(DDPGbase):
     def _build_a(self, s, reuse=None, custom_getter=None):
         trainable = True if reuse is None else False
         with tf.variable_scope('Actor', reuse=reuse, custom_getter=custom_getter):
-            h1 = tf.layers.dense(s, 64, activation=tf.nn.tanh, name='l1', trainable=trainable)
-            h2 = tf.layers.dense(h1, 32, activation=tf.nn.tanh, name='l2', trainable=trainable)
-            #h3 = tf.layers.dense(h2, 32, activation=tf.nn.tanh, name='l3', trainable=trainable)
-            a = tf.layers.dense(h2, self.a_dim, activation=tf.nn.sigmoid, name='a', trainable=trainable)
+            h1 = tf.layers.dense(s, 256, activation=tf.nn.tanh, name='l1', trainable=trainable)
+            h2 = tf.layers.dense(h1, 256, activation=tf.nn.tanh, name='l2', trainable=trainable)
+            h3 = tf.layers.dense(h2, 256, activation=tf.nn.tanh, name='l3', trainable=trainable)
+            a = tf.layers.dense(h3, self.a_dim, activation=tf.nn.sigmoid, name='a', trainable=trainable)
             return a
 
     def _build_c(self, s, a, reuse=None, custom_getter=None):
         trainable = True if reuse is None else False
         with tf.variable_scope('Critic', reuse=reuse, custom_getter=custom_getter):
-            n_l1 = 64
+            n_l1 = 256
             w1_s = tf.get_variable('w1_s', [self.s_dim, n_l1], trainable=trainable)
             w1_a = tf.get_variable('w1_a', [self.a_dim, n_l1], trainable=trainable)
             b1 = tf.get_variable('b1', [1, n_l1], trainable=trainable)
             net1 = tf.nn.relu(tf.matmul(s, w1_s) + tf.matmul(a, w1_a) + b1)
-            net2 = tf.layers.dense(net1, 32, activation=tf.nn.relu, trainable=trainable)
-            #net3 = tf.layers.dense(net2, 32, activation=tf.nn.relu, trainable=trainable)
-            return tf.layers.dense(net2, 1, trainable=trainable)  # Q(s,a)
+            net2 = tf.layers.dense(net1, 256, activation=tf.nn.relu, trainable=trainable)
+            net3 = tf.layers.dense(net2, 256, activation=tf.nn.relu, trainable=trainable)
+            return tf.layers.dense(net3, 1, trainable=trainable)  # Q(s,a)
 
 class DDPGlearning:
     """
@@ -163,10 +170,11 @@ class DDPGlearning:
         else:
             self.ddpg = DDPGattack(action_size, state_size)
 
-    def learn(self, initial_state, state_observe, state_update, rnd=Random(0)):
+    def learn(self, model, initial_state, state_observe, state_update, rnd=Random(0)):
         """
         Q-learning based algorithm for learning the best actions in every state.
         Note that due to performance reasons, the state-value function (i.e., Q) is not updated after every self.step, but only in batches.
+        :param model: Model of the alert prioritization problem (i.e., Model object).
         :param initial_state: Initial state, represented as an arbitrary object (note that this can be of a different format than the states used in other functions of QLearning).
         :param state_observe: Observes the state. Function, takes either initial_state or a state output by state_update, returns a list of floats (of length state_size).
         :param state_update: Updates the state based on an action. Function, takes a state (see state_observe) and an action (normalized list of floats), return the next state (may be arbitrary object).
@@ -174,24 +182,34 @@ class DDPGlearning:
         """
         logging.info("DDPG training starts.")
 
-        # Generate random states for state initilization in each eposide        
+        # Generate random states for state initilization in each eposide and the initialization of the replay buffer       
         states = []
         global_state = initial_state
         states.append(global_state)
         for i in range(MEMORY_CAPACITY):
-            if self.mode == "defend":
-                action = normalized([rnd.random() for i in range(self.action_size)])
-            else:
-                action = [rnd.random() for i in range(self.action_size)]
-            (next_global_state, loss) = state_update(global_state, action)
+            # Generate random actions
+            attack_random_action = np.random.uniform(0, 1, size=len(model.attack_types))
+            defense_random_action = np.random.uniform(0, 1, size=model.horizon*len(model.alert_types))
+            defense_random_action = defense_random_action/sum(defense_random_action)
+            # Make the random actions feasible
+            alpha = model.make_attack_feasible(list(attack_random_action)) # alpha is a list
+            delta = model.make_investigation_feasible(global_state.N, unflatten_list(list(defense_random_action), len(model.alert_types))) # delta is a list            
+            # State trasition
+            state = np.array(state_observe(global_state),dtype=np.float32)
+            next_global_state = model.next_state(global_state, delta, alpha)            
+            # Store the new global state
             states.append(next_global_state)
+            # Set the replay buffer            
+            next_state = np.array(state_observe(next_global_state), dtype=np.float32)
+            defender_loss = next_global_state.U - global_state.U
             global_state = next_global_state
+            if self.mode == "defend":
+                self.ddpg.store_transition(state, defense_random_action, -1*defender_loss, next_state)
+            else:
+                self.ddpg.store_transition(state, attack_random_action, defender_loss, next_state)
 
         # DDPG training process
-        epsilon = 0.0
-        epsilon_max = 1.0
-        t1 = time.time()
-        rewards = []
+        epsilon = 1.0
         for i in range(MAX_EPISODES):
             global_state = random.choice(states)
             state = np.array(state_observe(global_state),dtype=np.float32)
@@ -200,7 +218,7 @@ class DDPGlearning:
             exploit_flag = True
             for j in range(MAX_EP_STEPS):
                 # epsilon-greedy
-                if np.random.uniform() < epsilon:
+                if np.random.uniform() >= epsilon:
                     exploit_flag = True
                     action = self.ddpg.choose_action(state) #action has been normalized by choos_action()
                 else:
@@ -216,7 +234,7 @@ class DDPGlearning:
                 reward = -1.0*loss
                 self.ddpg.store_transition(state, action, reward, next_state)
 
-                if self.ddpg.pointer > MEMORY_CAPACITY and (j+1) % 5 == 0:
+                if self.ddpg.pointer > MEMORY_CAPACITY and (j+1) % LEARNING_STEP == 0:
                     self.ddpg.learn()
 
                 global_state = next_global_state
@@ -226,45 +244,44 @@ class DDPGlearning:
                     exploit_reward.append(reward)
 
                 if j == MAX_EP_STEPS-1:
-                    #print('Episode:', i, ' Reward: %i' % int(total_reward), 'Explore: %.5f' % epsilon, )
                     ave_reward = total_reward/MAX_EP_STEPS
                     #logging.info("Episode {}, Average reward in each step {}".format(i, ave_reward))
-                    if (i+1) % 100 == 0:
+                    if (i+1) % (MAX_EPISODES/10) == 0:
                         if len(exploit_reward) == 0:
                             logging.info("Episode {}, Ave reward {}, Ave exploitation reward unavailable".format(i, ave_reward))
                         else:
                             logging.info("Episode {}, Ave reward {}, Ave exploitation reward {}".format(i, ave_reward, sum(exploit_reward)/len(exploit_reward)))
-                    rewards.append(ave_reward)
-                    epsilon = epsilon+0.002 if epsilon < epsilon_max else epsilon_max
+                    epsilon = epsilon*EPSILON_DISCOUNT
                     break
-         
+
         logging.info("DDPG test starts.")
         total_reward = 0            
         for i in range(TEST_EPISODES):
-            global_state = random.choice(states)
+            global_state = initial_state
             state = np.array(state_observe(global_state),dtype=np.float32)
             episode_reward = 0.0
             for j in range(MAX_TEST_STEPS):
                 # Choose the best action by the actor network
                 action = self.ddpg.choose_action(state)
-                #action = np.array([0.16,0.16,0.16,0.16,0.16,0.16], dtype=np.float32)
+
                 (next_global_state, loss) = state_update(global_state, list(action))
                 next_state = np.array(state_observe(next_global_state), dtype=np.float32)
                 global_state = next_global_state
                 state = next_state
                 step_reward = -1.0*loss
-                episode_reward += step_reward
-            episode_reward = episode_reward/MAX_TEST_STEPS
-            logging.info("Episode {}, Average reward in each step {}".format(i, episode_reward))
+                episode_reward += GAMMA**j*step_reward
+            episode_reward = episode_reward#/MAX_TEST_STEPS
+            #logging.info("Episode {}, Average reward in each step {}".format(i, episode_reward))
             total_reward += episode_reward
         if TEST_EPISODES != 0:
             ave_reward = total_reward/TEST_EPISODES
-            logging.info("Average reward in each step {}".format(ave_reward))
+            logging.info("Expected discount reward {}".format(ave_reward))
 
-    def learn_from_mix(self, initial_state, state_observe, state_update, op_profile, op_strategy, rnd=Random(0)):
+    def learn_from_mix(self, model, initial_state, state_observe, state_update, op_profile, op_strategy, rnd=Random(0)):
         """
         Q-learning based algorithm for learning the best actions in every state against mixed strategy of the opponent.
         Note that due to performance reasons, the state-value function (i.e., Q) is not updated after every self.step, but only in batches.
+        :param model: Model of the alert prioritization problem (i.e., Model object).
         :param initial_state: Initial state, represented as an arbitrary object (note that this can be of a different format than the states used in other functions of QLearning).
         :param state_observe: Observes the state. Function, takes either initial_state or a state output by state_update, returns a list of floats (of length state_size).
         :param state_update: Updates the state based on an action. Function, takes a state (see state_observe), an action (normalized list of floats) and oppoent's action sampled from its mixed strategy, return the next state (may be arbitrary object).
@@ -274,36 +291,48 @@ class DDPGlearning:
         """
         logging.info("DDPG training starts.")
 
-        # generate random states for state initilization in each eposide                
+        # Generate random states for state initilization in each eposide and the initialization of the replay buffer       
         states = []
         global_state = initial_state
         states.append(global_state)
-        op_actions = np.random.choice(op_profile, MEMORY_CAPACITY, p=op_strategy)
         for i in range(MEMORY_CAPACITY):
-            if self.mode == "defend":
-                action = normalized([rnd.random() for i in range(self.action_size)])
-            else:
-                action = [rnd.random() for i in range(self.action_size)]
-            (next_global_state, loss) = state_update(global_state, action, op_actions[i])
+            # Generate random actions
+            attack_random_action = np.random.uniform(0, 1, size=len(model.attack_types))
+            defense_random_action = np.random.uniform(0, 1, size=model.horizon*len(model.alert_types))
+            defense_random_action = defense_random_action/sum(defense_random_action)
+            # Make the random actions feasible
+            alpha = model.make_attack_feasible(list(attack_random_action)) # alpha is a list
+            delta = model.make_investigation_feasible(global_state.N, unflatten_list(list(defense_random_action), len(model.alert_types))) # delta is a list            
+            # State trasition
+            state = np.array(state_observe(global_state),dtype=np.float32)
+            next_global_state = model.next_state(global_state, delta, alpha)            
+            # Store the new global state
             states.append(next_global_state)
+            # Set the replay buffer            
+            next_state = np.array(state_observe(next_global_state), dtype=np.float32)
+            defender_loss = next_global_state.U - global_state.U
             global_state = next_global_state
+            if self.mode == "defend":
+                self.ddpg.store_transition(state, defense_random_action, -1*defender_loss, next_state)
+            else:
+                self.ddpg.store_transition(state, attack_random_action, defender_loss, next_state)
 
         # DDPG training process
-        epsilon = 0.0
-        epsilon_max = 1.0
-        t1 = time.time()
-        rewards = []
+        epsilon = 1.0
         op_actions = np.random.choice(op_profile, MAX_EPISODES, p=op_strategy)
+
         for i in range(MAX_EPISODES):
             global_state = random.choice(states)
             state = np.array(state_observe(global_state),dtype=np.float32)
             total_reward = 0.0
             exploit_reward = []
             exploit_flag = True
+            
             op_action = op_actions[i]
+            
             for j in range(MAX_EP_STEPS):
                 # epsilon-greedy
-                if np.random.uniform() < epsilon:
+                if np.random.uniform() >= epsilon:
                     exploit_flag = True
                     action = self.ddpg.choose_action(state) #action has been normalized by choos_action()
                 else:
@@ -319,7 +348,7 @@ class DDPGlearning:
                 reward = -1.0*loss
                 self.ddpg.store_transition(state, action, reward, next_state)
 
-                if self.ddpg.pointer > MEMORY_CAPACITY and (j+1) % 5 == 0:
+                if self.ddpg.pointer > MEMORY_CAPACITY and (j+1) % LEARNING_STEP == 0:
                     self.ddpg.learn()
 
                 global_state = next_global_state
@@ -332,15 +361,39 @@ class DDPGlearning:
                     #print('Episode:', i, ' Reward: %i' % int(total_reward), 'Explore: %.5f' % epsilon, )
                     ave_reward = total_reward/MAX_EP_STEPS
                     #logging.info("Episode {}, Average reward in each step {}".format(i, ave_reward))
-                    if (i+1) % 100 == 0:
+                    if (i+1) % (MAX_EPISODES/10) == 0:
                         if len(exploit_reward) == 0:
                             logging.info("Episode {}, Ave reward {}, Ave exploitation reward unavailable".format(i, ave_reward))
                         else:
                             
                             logging.info("Episode {}, Ave reward {}, Ave exploitation reward {}".format(i, ave_reward, sum(exploit_reward)/len(exploit_reward)))
-                    rewards.append(ave_reward)
-                    epsilon = epsilon+0.002 if epsilon < epsilon_max else epsilon_max
+                    epsilon = epsilon*EPSILON_DISCOUNT
                     break                                
+
+        logging.info("DDPG test starts.")
+        total_reward = 0
+        op_actions = np.random.choice(op_profile, MAX_EPISODES, p=op_strategy)            
+        for i in range(TEST_EPISODES):
+            global_state = initial_state
+            state = np.array(state_observe(global_state),dtype=np.float32)
+            episode_reward = 0.0
+            op_action = op_actions[i]
+            for j in range(MAX_TEST_STEPS):
+                # Choose the best action by the actor network
+                action = self.ddpg.choose_action(state)
+
+                (next_global_state, loss) = state_update(global_state, list(action), op_action)
+                next_state = np.array(state_observe(next_global_state), dtype=np.float32)
+                global_state = next_global_state
+                state = next_state
+                step_reward = -1.0*loss
+                episode_reward += GAMMA**j*step_reward
+            episode_reward = episode_reward#/MAX_TEST_STEPS
+            #logging.info("Episode {}, Average reward in each step {}".format(i, episode_reward))
+            total_reward += episode_reward
+        if TEST_EPISODES != 0:
+            ave_reward = total_reward/TEST_EPISODES
+            logging.info("Expected discount reward {}".format(ave_reward))
 
     def policy(self, model, state):
         """
@@ -383,12 +436,16 @@ class DefenderBestResponse:
             next_state = model.next_state(state, delta, alpha)
             loss = next_state.U - state.U
             return (next_state, loss)
-        self.agent.learn(Model.State(model),
+        self.agent.learn(model,
+                        Model.State(model),
                         lambda state: flatten_lists(state.N),
                         state_update)
+        #pickle.dump(self.agent, open('model/defender-'+str(defender_ind)+'.pickle','wb'))
+        #global defender_ind
+        #defender_ind += 1
         tf.reset_default_graph()
 
-class DefendMixedAttack:
+class DefenderOracle:
     """Best-response investigation policy for the defender against mix strategy of the attacker."""
     def __init__(self, model, attack_profile, attack_strategy):
         """
@@ -411,7 +468,8 @@ class DefendMixedAttack:
             next_state = model.next_state(state, delta, alpha)
             loss = next_state.U - state.U
             return (next_state, loss)
-        self.agent.learn_from_mix(Model.State(model),
+        self.agent.learn_from_mix(model,
+                                 Model.State(model),
                                  lambda state: flatten_lists(state.N),
                                  state_update,
                                  attack_profile,
@@ -441,12 +499,13 @@ class AttackerBestResponse:
             next_state = model.next_state(state, delta, alpha)
             loss = -1.0 * (next_state.U - state.U)
             return (next_state, loss)
-        self.agent.learn(Model.State(model),
+        self.agent.learn(model,
+                        Model.State(model),
                         lambda state: flatten_state(state),
                         state_update)
         tf.reset_default_graph()
 
-class AttackMixedDefense:
+class AttackerOracle:
     """Best-response attack policy for the attacker against mixed strategy of defender."""
     def __init__(self, model, defense_profile, defense_strategy):
         """
@@ -471,7 +530,8 @@ class AttackMixedDefense:
             next_state = model.next_state(state, delta, alpha)
             loss = -1.0 * (next_state.U - state.U)
             return (next_state, loss)                        
-        self.agent.learn_from_mix(Model.State(model),
+        self.agent.learn_from_mix(model,
+                        Model.State(model),
                         lambda state: flatten_state(state),                        
                         state_update,
                         defense_profile,
@@ -480,11 +540,7 @@ class AttackMixedDefense:
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
-    model = test_model()
-    attack_profile = [test_attack_action, test_attack_action]
-    attack_strategy = [0.6, 0.4]
-    defense_profile = [test_defense_action, test_defense_action]
-    defense_strategy = [0.4, 0.6]
-    #DefendMixedAttack(model, attack_profile, attack_strategy)
-    AttackerBestResponse(model, test_defense_action)
-    AttackMixedDefense(model, defense_profile, defense_strategy)
+    model = test_model1()    
+    defender = DefenderBestResponse(model, test_attack_action)
+    #attacker = AttackerBestResponse(model, test_defense_newest)
+ 
