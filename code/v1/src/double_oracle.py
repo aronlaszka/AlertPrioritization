@@ -3,9 +3,9 @@
 from scipy import optimize as op
 from listutils import *
 from model import Model
-from test import test_model, test_attack_action, test_defense_action, test_defense_newest
+from test import test_model1, test_model2, test_model3, test_attack_action, test_defense_action, test_defense_newest
 from listutils import *
-from ddpg import DefendMixedAttack, AttackMixedDefense
+from ddpg import DefenderOracle, AttackerOracle, DefenderBestResponse, AttackerBestResponse
 
 import numpy as np
 import random
@@ -15,10 +15,9 @@ import pickle
 """Implementation of double-oracle algorithms."""
 
 MAX_EPISODES = 500
-MAX_STEPS = 50
+MAX_STEPS = 200
 GAMMA = 0.9
 MAX_ITERATION = 300
-INITIAL_ACTION_SIZE = 10
 
 def find_mixed_NE(payoff):
     """
@@ -46,30 +45,6 @@ def find_mixed_NE(payoff):
     res_defender = op.linprog(c, A_ub, b_ub, A_eq, b_eq, bounds=bound)
     return list(res_attacker.x[0:n_action]), list(res_defender.x[0:n_action]), res_attacker.fun
 
-def get_payoff(model, states, attack_policy, defense_policy):
-    """
-    Function for computing the payoff of the defender given its strategy and the strategy of the attacker. 
-    :param model: Model of the alert prioritization problem (i.e., Model object).
-    :param states: a random collection of the states used as the initial state of each episode
-    :param attack_policy: Function, takes a model and a state, returns the portion of budget allocated for each type of attacks given a model and a state.
-    :param defense_policy: Function, takes a model and a state, returns the portion of budget allocated for each type of alerts with all ages given a model and a state.
-    :return: The expected discounted reward. 
-    """
-    total_discount_reward = 0  
-    for i in range(MAX_EPISODES):
-        state = random.choice(states)
-        episode_reward = 0.0
-        for j in range(MAX_STEPS):
-            next_state = model.next_state(state, defense_policy, attack_policy)
-            loss = next_state.U - state.U
-            state = next_state
-            step_reward = -1.0*loss
-            episode_reward += GAMMA**j*step_reward
-        #print(i, episode_reward)
-        total_discount_reward += episode_reward
-    ave_discount_reward = total_discount_reward/MAX_EPISODES
-    return ave_discount_reward
-
 def get_payoff_mixed(model, states, attack_profile, defense_profile, attack_strategy, defense_strategy):
     """
     Function for computing the payoff of the defender given its mixed strategy and the mixed strategy of the attacker. 
@@ -82,13 +57,50 @@ def get_payoff_mixed(model, states, attack_profile, defense_profile, attack_stra
     :return: The expected discounted reward. 
     """
     total_discount_reward = 0
+    
     attack_policies = np.random.choice(attack_profile, MAX_EPISODES, p=attack_strategy)
-    defense_policies = np.random.choice(defense_profile, MAX_EPISODES, p=defense_strategy)  
+    defense_policies = np.random.choice(defense_profile, MAX_EPISODES, p=defense_strategy) 
+
+    initial_state = Model.State(model)
+
     for i in range(MAX_EPISODES):
-        state = random.choice(states)
+        #state = random.choice(states)
+        #state = states[i]
+        state = initial_state
         episode_reward = 0.0
         defense_policy = defense_policies[i]
         attack_policy = attack_policies[i]
+        for j in range(MAX_STEPS):
+            #attack_policy = np.random.choice(attack_profile, 1, p=attack_strategy)[0]
+            #defense_policy = np.random.choice(defense_profile, 1, p=defense_strategy)[0]
+
+            next_state = model.next_state(state, defense_policy, attack_policy)
+            loss = next_state.U - state.U
+            state = next_state
+            step_reward = -1.0*loss
+            episode_reward += GAMMA**j*step_reward
+
+        #print(i, episode_reward)
+        total_discount_reward += episode_reward
+    ave_discount_reward = total_discount_reward/MAX_EPISODES
+    return ave_discount_reward
+
+def get_payoff(model, states, attack_policy, defense_policy):
+    """
+    Function for computing the payoff of the defender given its strategy and the strategy of the attacker. 
+    :param model: Model of the alert prioritization problem (i.e., Model object).
+    :param states: a random collection of the states used as the initial state of each episode
+    :param attack_policy: Function, takes a model and a state, returns the portion of budget allocated for each type of attacks given a model and a state.
+    :param defense_policy: Function, takes a model and a state, returns the portion of budget allocated for each type of alerts with all ages given a model and a state.
+    :return: The expected discounted reward. 
+    """
+    #ave_discount_reward = get_payoff_mixed(model, states, [attack_policy], [defense_policy], [1.0], [1.0])	
+    total_discount_reward = 0
+    initial_state = Model.State(model)  
+    for i in range(MAX_EPISODES):
+        #state = random.choice(states)
+        state = initial_state
+        episode_reward = 0.0
         for j in range(MAX_STEPS):
             next_state = model.next_state(state, defense_policy, attack_policy)
             loss = next_state.U - state.U
@@ -136,6 +148,122 @@ def update_profile(model, states, payoff, attack_profile,
     payoff = np.concatenate((payoff, new_payoff_row), axis=0)
     return payoff, attack_profile, defense_profile
 
+def random_states(model):
+    """
+    Generate random states for future use
+    :param model: Model of the alert prioritization problem (i.e., Model object). 
+    :return: A list of global states.
+    """
+    states = []
+    initial_state = Model.State(model)
+    global_state = initial_state
+    states.append(global_state)
+    for i in range(10*MAX_EPISODES):
+        # Generate random actions
+        attack_random_action = np.random.uniform(0, 1, size=len(model.attack_types))
+        defense_random_action = np.random.uniform(0, 1, size=model.horizon*len(model.alert_types))
+        defense_random_action = defense_random_action/sum(defense_random_action)
+        # Make the random actions feasible
+        alpha = model.make_attack_feasible(list(attack_random_action)) # alpha is a list
+        delta = model.make_investigation_feasible(global_state.N, unflatten_list(list(defense_random_action), len(model.alert_types))) # delta is a list            
+        # State trasition
+        next_global_state = model.next_state(global_state, delta, alpha)            
+        # Store the new global state
+        states.append(next_global_state)
+        global_state = next_global_state    
+    return states
+
+def double_oracle(model, initial_mode):
+    states = random_states(model)
+    print("Initializing...")
+    attack_profile = []
+    defense_profile = []
+    payoff = []
+    payoff_record = []
+    initial_action_size = 0
+    if initial_mode == "random":
+        initial_action_size = 10
+        # Initialize random action profiles
+        for i in range(initial_action_size):
+            attack_action = np.random.uniform(0, 1, size=len(model.attack_types))
+            defense_action = np.random.uniform(0, 1, size=model.horizon*len(model.alert_types))
+            defense_action = defense_action/sum(defense_action)
+            def attack_initial_policy(model, state):
+                action = list(attack_action)
+                alpha = model.make_attack_feasible(action)
+                return alpha
+            def defense_initial_policy(model, state):
+                action = list(defense_action)
+                delta = model.make_investigation_feasible(state.N, unflatten_list(action, len(model.alert_types)))
+                return delta
+            attack_profile.append(attack_initial_policy)
+            defense_profile.append(defense_initial_policy)
+        # Initialize the payoff matrix
+        payoff = np.zeros((initial_action_size, initial_action_size))
+        for i in range(initial_action_size):
+            for j in range(initial_action_size):
+                payoff[i][j] = get_payoff(model, states, attack_profile[j], defense_profile[i])
+    else:
+        initial_action_size = 1
+        # Initialize the payoff matrix
+        initial_payoff = get_payoff(model, states, test_attack_action, test_defense_newest)
+        payoff = np.array([[initial_payoff]])
+        # Initialize the action profile
+        attack_profile = [test_attack_action]
+        defense_profile = [test_defense_newest]
+
+    # Compute new strategies and actions
+    for i in range(MAX_ITERATION):
+        attack_strategy, defense_strategy, utility = find_mixed_NE(payoff)
+        payoff_record.append(utility)
+
+        print("###########################################################################################")
+        print("Iteration", i)
+
+        print("Current payoff matrix:")
+        print(payoff)
+
+        print("Attacker's mixed strategy:")
+        print(attack_strategy)
+        print("Defender's mixed strategy:")
+        print(defense_strategy)
+
+        print("The expected utility of the defender (solved by LP) from the start to current iteration:")
+        print(payoff_record)
+
+        if initial_mode == "random":
+            utility_defender_newest = get_payoff_mixed(model, states, attack_profile, [test_defense_newest], attack_strategy, [1.0])
+        else:
+            utility_defender_newest = np.dot(payoff[0], attack_strategy)
+        print("The expected defender utility when defender deviates from NE and uniformly distributes the budget among newest alerts:")
+        print(utility_defender_newest)
+
+        #utility_attacker_uniform = get_payoff_mixed(model, states, [test_attack_action], defense_profile, [1.0], defense_strategy)
+        utility_attacker_uniform = np.dot(payoff[:,0], defense_strategy)
+        print("The expected attacker utility when attacker deviates and uniformly distributes the budget among all attack types. ")
+        print(utility_attacker_uniform)
+
+        # Get new response to the mixed strategy
+        attack_response = AttackerOracle(model, defense_profile, defense_strategy)
+        defense_response = DefenderOracle(model, attack_profile, attack_strategy)
+        
+        attack_policy = attack_response.agent.policy
+        defense_policy = defense_response.agent.policy
+
+        # Update profile    
+        payoff, attack_profile, defense_profile = update_profile(model, states, payoff, attack_profile, defense_profile, attack_policy, defense_policy)
+
+        # Test the terminate condition
+        #attack_pure_utility = -1*get_payoff_mixed(model, states, [attack_response.agent.policy], defense_profile, [1.0], defense_strategy)
+        #defense_pure_utility = get_payoff_mixed(model, states, attack_profile, [defense_response.agent.policy], attack_strategy, [1.0])
+        attack_pure_utility = -1*np.dot(payoff[:,i+initial_action_size][0:(len(payoff[:,i+initial_action_size])-1)], defense_strategy)
+        defense_pure_utility = np.dot(payoff[i+initial_action_size][0:(len(payoff[i+initial_action_size])-1)], attack_strategy)
+        print("The utility of pure attack:", attack_pure_utility)
+        print("The utility of pure defense:", defense_pure_utility)
+        if -1*utility >= attack_pure_utility and utility >= defense_pure_utility:
+            print("No pure strategy found, terminate")
+            break
+
 def test_mixed_NE():
     """
     Test find_mixed_NE with the Matching Pennies game and Rock-Paper-Scissors on page 58 of Multiagent Systems.
@@ -148,7 +276,7 @@ def test_mixed_NE():
 
 def test_get_payoff():
     # First generate random states for future use
-    model = test_model()
+    model = test_model1()
     initial_state = Model.State(model)
     states = []
     global_state = initial_state
@@ -162,7 +290,7 @@ def test_get_payoff():
 
 def test_payoff_mixed():
     # Generate random states for future use
-    model = test_model()
+    model = test_model1()
     initial_state = Model.State(model)
     states = []
     global_state = initial_state
@@ -174,86 +302,12 @@ def test_payoff_mixed():
 
     for i in range(10):
         print(get_payoff(model, states, test_attack_action, test_defense_newest))
-        print(get_payoff_mixed(model, states, [test_attack_action], [test_defense_newest], [1.0], [1.0]))    
-
-def double_oracle():
-    # Generate random states for future use
-    model = test_model()
-    initial_state = Model.State(model)
-    states = []
-    global_state = initial_state
-    states.append(global_state)
-    for i in range(10*MAX_EPISODES):
-        next_global_state = model.next_state(global_state, test_defense_newest, test_attack_action)
-        states.append(next_global_state)
-        global_state = next_global_state    
-
-    # Initialize random action profiles
-    print("Initializing...")
-    attack_profile = []
-    defense_profile = []
-    for i in range(INITIAL_ACTION_SIZE):
-        attack_action = np.random.uniform(0, 1, size=len(model.attack_types))
-        defense_action = np.random.uniform(0, 1, size=model.horizon*len(model.alert_types))
-        defense_action = defense_action/sum(defense_action)
-        def attack_initial_policy(model, state):
-            action = list(attack_action)
-            alpha = model.make_attack_feasible(action)
-            return alpha
-        def defense_initial_policy(model, state):
-            action = list(defense_action)
-            delta = model.make_investigation_feasible(state.N, unflatten_list(action, len(model.alert_types)))
-            return delta
-        attack_profile.append(attack_initial_policy)
-        defense_profile.append(defense_initial_policy)
-
-    # Initialize the payoff matrix
-    payoff = np.zeros((INITIAL_ACTION_SIZE, INITIAL_ACTION_SIZE))
-    for i in range(INITIAL_ACTION_SIZE):
-        for j in range(INITIAL_ACTION_SIZE):
-            payoff[i][j] = get_payoff(model, states, attack_profile[j], defense_profile[i])
-    payoff_record = []
-
-    # Compute new strategies and actions
-    for i in range(MAX_ITERATION):
-        attack_strategy, defense_strategy, utility = find_mixed_NE(payoff)
-        payoff_record.append(utility)
-
-        print("###########################################################################################")
-        print("Iteration", i)
-        print("The utility of the defender (solved by LP) from the start to current iteration:")
-        print(payoff_record)
-
-        utility_defender_newest = get_payoff_mixed(model, states, attack_profile, [test_defense_newest], attack_strategy, [1.0])
-        print("The utility when defender deviates from NE and uniformly distributes the budget among newest alerts:")
-        print(utility_defender_newest)
-
-        utility_attacker_uniform = get_payoff_mixed(model, states, [test_attack_action], defense_profile, [1.0], defense_strategy)
-        print("The utility when attacker deviates by uniformly distributes the budget among all attack types. ")
-        print(utility_attacker_uniform)
-
-        # Get new response to the mixed strategy
-        attack_response = AttackMixedDefense(model, defense_profile, defense_strategy)
-        defense_response = DefendMixedAttack(model, attack_profile, attack_strategy)
-        
-        attack_policy = attack_response.agent.policy
-        defense_policy = defense_response.agent.policy
-
-        # Test the terminate condition
-        attack_pure_utility = -1*get_payoff_mixed(model, states, [attack_policy], defense_profile, [1.0], defense_strategy)
-        defense_pure_utility = get_payoff_mixed(model, states, attack_profile, [defense_policy], attack_strategy, [1.0])
-        print("The utility of pure attack:", attack_pure_utility)
-        print("The utility of pure defense:", defense_pure_utility)
-        if -1*utility >= attack_pure_utility and utility >= defense_pure_utility:
-            print("No pure strategy found, terminate")
-            break
-
-        # Update profile    
-        payoff, attack_profile, defense_profile = update_profile(model, states, payoff, attack_profile, defense_profile, attack_policy, defense_policy)
+        print(get_payoff_mixed(model, states, [test_attack_action], [test_defense_newest], [1.0], [1.0]))
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
-    #test_mixed_solution()
-    #test_get_payoff()
-    #test_payoff_mixed()
-    double_oracle()
+    model = test_model1()
+    initial_mode = "youngest" # Initial mode can be "youngest" and "random"
+    double_oracle(model, initial_mode)
+
+
