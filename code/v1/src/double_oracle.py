@@ -3,7 +3,7 @@
 from scipy import optimize as op
 from listutils import *
 from model import Model
-from test import test_model1, test_model2, test_model3, test_attack_action, test_defense_action, test_defense_newest
+from test import *
 from listutils import *
 from ddpg import DefenderOracle, AttackerOracle, DefenderBestResponse, AttackerBestResponse
 
@@ -222,7 +222,7 @@ def test_mixed_NE():
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
-    model = test_model3()
+    model = test_model_credit()
     initial_mode = "youngest" # Initial mode can be "youngest" and "random"
     double_oracle(model, initial_mode)
 
