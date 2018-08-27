@@ -7,7 +7,7 @@ from random import Random
 from time import time
 
 from model import Model
-from test import test_model1, test_model2,test_model3, test_attack_action, test_defense_action, test_defense_newest
+from test import test_model1, test_model2,test_model3, test_model_credit, test_attack_action, test_defense_action, test_defense_newest
 from listutils import *
 
 from keras.models import Sequential
@@ -267,6 +267,33 @@ class DDPGlearning:
             episode_reward = 0.0
             for j in range(MAX_TEST_STEPS):
                 action = self.ddpg.choose_action(state)
+                #action = np.array([0.2,0.2,0.2,0.2,0.2,0,0,0,0,0,0,0,0,0,0], dtype=np.float32)
+                (next_global_state, loss) = state_update(global_state, list(action))
+                next_state = np.array(state_observe(next_global_state), dtype=np.float32)
+                global_state = next_global_state
+                state = next_state
+                step_reward = -1.0*loss
+                episode_reward += GAMMA**j*step_reward
+            #logging.info("Episode {}, Average reward in each step {}".format(i, episode_reward))
+            total_reward += episode_reward
+        if TEST_EPISODES != 0:
+            ave_reward = total_reward/TEST_EPISODES
+            logging.info("Expected discount reward {}".format(ave_reward))
+
+        # DDPG test
+        logging.info("DDPG test with non-strategic baseline.")
+        total_reward = 0            
+        for i in range(TEST_EPISODES):
+            global_state = initial_state
+            state = np.array(state_observe(global_state),dtype=np.float32)
+            episode_reward = 0.0
+            for j in range(MAX_TEST_STEPS):
+                #action = self.ddpg.choose_action(state)
+                #action = np.array([1,0,0,0,0,0,0,0], dtype=np.float32)
+                if self.mode == "defend":
+                    action = np.array([0.2,0.2,0.2,0.2,0.2,0,0,0,0,0,0,0,0,0,0], dtype=np.float32)
+                else:
+                    action = np.array([0.125,0.125,0.125,0.125,0.125,0.125,0.125,0.125], dtype=np.float32)
                 (next_global_state, loss) = state_update(global_state, list(action))
                 next_state = np.array(state_observe(next_global_state), dtype=np.float32)
                 global_state = next_global_state
@@ -519,9 +546,9 @@ class AttackerOracle:
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
-    model = test_model3()    
+    model = test_model_credit()    
     for i in range(1):
-        #defender = DefenderBestResponse(model, test_attack_action)
+        defender = DefenderBestResponse(model, test_attack_action)
         attacker = AttackerBestResponse(model, test_defense_action)
         attacker = AttackerBestResponse(model, test_defense_newest)
  
