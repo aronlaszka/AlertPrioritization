@@ -37,13 +37,34 @@ def test_model3():
                   AlertType(1, PoissonDistribution(90), "t2"),
                   AlertType(1, PoissonDistribution(70), "t3"),
                   AlertType(1, PoissonDistribution(65), "t4"),
-                  AlertType(1, PoissonDistribution(80), "t4"),
-                  AlertType(1, PoissonDistribution(75), "t4")]  
+                  AlertType(1, PoissonDistribution(80), "t5"),
+                  AlertType(1, PoissonDistribution(75), "t6")]  
   attack_types = [AttackType([0, 0.2, 0.4], 75, [0.2, 0.9, 0.8, 0.1, 0.4, 0.6], "a1"),
                   AttackType([0, 0.8, 1.2], 100, [0.1, 0.7, 0.2, 0.5, 0.8, 0.6], "a2"),
                   AttackType([0, 0.5, 0.9], 89, [0.1, 0.1, 0.5, 0.5, 0.5, 0.9], "a3"),
                   AttackType([0, 0.8, 0.9], 64, [0.6, 0.2, 0.1, 0.5, 0.3, 0.8], "a4")]
   model = Model(3, alert_types, attack_types, 300, 200)
+  return model
+
+def test_model_credit():
+  """
+  Creat a test model by using the UCI German Credit dataset (H = 3, |T| = 5, |A| = 8).
+  :return: Model object. 
+  """
+  alert_types =  [AlertType(1, PoissonDistribution(355), "t1"), 
+                  AlertType(1, PoissonDistribution(82), "t2"),
+                  AlertType(1, PoissonDistribution(22), "t3"),
+                  AlertType(1, PoissonDistribution(36), "t4"),
+                  AlertType(1, PoissonDistribution(8), "t5")]
+  attack_types = [AttackType([0, 1.0, 1.5], 1, [0.37, 0.31, 0.07, 0.0, 0.0], "a1"),
+                  AttackType([0, 0.5, 0.9], 1, [0.37, 0.0, 0.0, 0.0, 0.0], "a2"),
+                  AttackType([0, 0.3, 0.5], 1, [0.37, 0.0, 0.0, 0.07, 0.0], "a3"),
+                  AttackType([0, 0.2, 0.3], 1, [0.37, 0.0, 0.0, 0.07, 0.0], "a4"),
+                  AttackType([0, 0.4, 0.7], 1, [0.37, 0.0, 0.0, 0.07, 0.0], "a5"),
+                  AttackType([0, 0.2, 0.4], 1, [0.37, 0.0, 0.0, 0.0, 0.0], "a6"),
+                  AttackType([0, 1.0, 1.2], 1, [0.37, 0.31, 0.0, 0.0, 0.0], "a7"),
+                  AttackType([0, 1.1, 1.3], 1, [0.37, 0.0, 0.0, 0.0, 0.11], "a8")]
+  model = Model(3, alert_types, attack_types, 250, 100)
   return model
 
 def test_defense_action(model, state):
@@ -93,13 +114,13 @@ def test_attack_action(model, state):
   return alpha
   
 if __name__ == "__main__":
-  model = test_model()
+  model = test_model_credit()
   state = Model.State(model)
   print(test_defense_action(model, state))
   print(test_attack_action(model, state))
   i = 0
-  while True:
+  while i < 100:
     print(i, state)
-    state = model.next_state(state, test_defense_action(model, state), test_attack_action)
+    state = model.next_state(state, test_defense_newest(model, state), test_attack_action)
     i += 1
 
