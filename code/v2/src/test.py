@@ -2,72 +2,25 @@
 
 """Test instances for the alert prioritization model."""
 
-from model_simple import PoissonDistribution, NormalDistribution, AlertType, AttackType, Model
+from model_simple import PoissonDistribution, GammaDistribution, NormDistribution, UniformDistribution, BetaDistribution, AlertType, AttackType, Model
 import numpy as np
+import sys
 
 EPSILON = 0.00001
 
-'''
 def test_model_fraud(def_budget, adv_budget):
   """
-  Creat a test model by using the UCI German Credit dataset (H = 3, |T| = 5, |A| = 8).
+  Creat a test model by using the credit fraud dataset (H = 1, |T| = 6, |A| = 6).
   :return: Model object. 
   """
-  alert_types =  [AlertType(1, PoissonDistribution(0), "t1"), 
-                  AlertType(1, PoissonDistribution(17), "t2"),
-                  AlertType(1, PoissonDistribution(0), "t3"),
-                  AlertType(1, PoissonDistribution(14), "t4"),
-                  AlertType(1, PoissonDistribution(23), "t5")]
-  attack_types = [AttackType([0, 0.1], 1, [0.09, 0.44, 0.08, 0.02, 0.27], "a1"),
-                  AttackType([0, 1], 1, [0.06, 0.55, 0.09, 0.0, 0.2], "a2"),
-                  AttackType([0, 10], 1, [0, 0.94, 0.02, 0.0, 0.0], "a3")]
-  #model = Model(2, alert_types, attack_types, 10, 3)
-  model = Model(2, alert_types, attack_types, def_budget, adv_budget)
-  return model
-'''
-
-def test_model_fraud(def_budget, adv_budget):
-  """
-  Creat a test model by using the Credit Fraud dataset (H = 1, |T| = 3, |A| = 3).
-  :return: Model object. 
-  """
-  alert_types =  [AlertType(1, PoissonDistribution(17), "t2"),
-                  AlertType(1, PoissonDistribution(14), "t4"),
-                  AlertType(1, PoissonDistribution(23), "t5")]
-  attack_types = [AttackType([0.1], 1, [0.44, 0.08, 0.27], "a1"),
-                  AttackType([1], 2, [0.55, 0.09, 0.2], "a2"),
-                  AttackType([10], 3, [0.94, 0.02, 0.0], "a3")]
-  #model = Model(2, alert_types, attack_types, 10, 3)
+  alert_types =  [AlertType(1.0, PoissonDistribution(10), "t1"), 
+                  AlertType(1.0, PoissonDistribution(47), "t4"),
+                  AlertType(1.0, PoissonDistribution(39), "t6")]
+  attack_types = [AttackType([9.374], 1, [1.0*0.9, 0.67*0.9, 0.0], "a1"),
+                  AttackType([12.14], 3, [0.01*0.9, 0.96*0.9, 0.13*0.9], "a4"),
+                  AttackType([16.03], 2, [0.0, 0.45*0.9, 0.94*0.9], "a6")]
   model = Model(1, alert_types, attack_types, def_budget, adv_budget)
   return model
-
-'''
-def test_model_suricata2(def_budget, adv_budget):
-  """
-  Creat a test model by using the IDS dataset (H = 1, |T| = 10, |A| = 7).
-  :return: Model object. 
-  """
-  alert_types =  [AlertType(1.0, PoissonDistribution(7200), "t1"), 
-                  AlertType(1.0, PoissonDistribution(44100), "t2"),
-                  AlertType(1.0, PoissonDistribution(1600), "t3"),
-                  AlertType(1.0, PoissonDistribution(7300), "t4"),
-                  AlertType(1.0, PoissonDistribution(17400), "t5"),
-                  AlertType(1.0, PoissonDistribution(4000), "t6"),
-                  AlertType(1.0, PoissonDistribution(10200), "t7"),
-                  AlertType(1.0, PoissonDistribution(0), "t8"),
-                  AlertType(1.0, PoissonDistribution(0), "t9"),
-                  AlertType(1.0, PoissonDistribution(0), "t10")]
-  attack_types = [AttackType([3.6], 120.0, [1230,0,0,0,0,0,0,0,4768,0], "a1"),
-                  AttackType([6.0], 60.0, [0,4,2,106,0,54,0,0,0,0], "a2"),
-                  AttackType([4.0], 74.0, [0,0,0,0,0,24,0,30350,0,42], "a3"),
-                  AttackType([3.6], 20.0, [0,0,4,0,10,0,0,0,0,0], "a4"),
-                  AttackType([1.4], 52.0, [710,2,862,12,0,80,600,54448,0,768], "a5"),
-                  AttackType([1.4], 80.0, [138,0,320,30,0,0,0,0,0,0], "a6"),
-                  AttackType([2.7], 62.0, [0,0,6,0,0,0,0,0,0,7192], "a7")]
-  #model = Model(1, alert_types, attack_types, 500.0, 120.0)
-  model = Model(1, alert_types, attack_types, def_budget, adv_budget)
-  return model
-'''
 
 def test_model_suricata(def_budget, adv_budget):
   """
@@ -163,6 +116,86 @@ def test_defense_suricata(model, state):
       break
   return delta
 
+def test_defense_aics(model, state):
+  """
+  Compute an investigation action based on the aics implementation
+  :param model: Model of the alert prioritization problem (i.e., Model object).
+  :param state: State of the alert prioritization problem (i.e., Model.State object).
+  :return: Number of alerts to investigate. Two-dimensional array, delta[h][t] is the number of alerts to investigate of type t raised h time steps ago.
+  """
+  delta = []
+  for h in range(model.horizon):
+    delta.append([0]*len(model.alert_types))
+  remain_budget = model.def_budget
+  used_budget = 0.0
+
+  if model.def_budget == 20:
+    prio_profile, prob_profile = [[3, 1, 2], [2, 3, 1]], [0.20295405010983106, 0.7970459498901689]
+  elif model.def_budget == 30:
+    prio_profile, prob_profile = [[3, 1, 2], [2, 3, 1]], [0.6140734776822184, 0.38592652231778135]
+  elif model.def_budget == 40:
+    prio_profile, prob_profile = [[3, 1, 2], [2, 3, 1]], [0.622029540310321, 0.3779704596896787]
+  elif model.def_budget == 5:
+  	prio_profile, prob_profile = [[2, 3, 1]], [1.0]
+  elif model.def_budget == 10:
+  	prio_profile, prob_profile = [[3, 2, 1]], [1.0]
+  elif model.def_budget == 15:
+  	prio_profile, prob_profile = [[3, 2, 1]], [1.0]
+
+  ind = np.random.choice(len(prio_profile), p=prob_profile)
+  alert_priority = np.array(prio_profile[ind]) 
+
+  for i in range(np.unique(alert_priority).shape[0]):
+    if remain_budget > 0:
+      index_priority = np.where(alert_priority == i+1)[0]
+      for j in index_priority:
+        delta[0][j] = min(int(remain_budget / index_priority.shape[0] / model.alert_types[j].cost), state.N[0][j])
+        used_budget += delta[0][j] * model.alert_types[j].cost
+      remain_budget = model.def_budget - used_budget
+    else:
+      break
+  return delta
+
+def test_defense_icde(model, state):
+  """
+  Compute an investigation action based on the icde implementation
+  :param model: Model of the alert prioritization problem (i.e., Model object).
+  :param state: State of the alert prioritization problem (i.e., Model.State object).
+  :return: Number of alerts to investigate. Two-dimensional array, delta[h][t] is the number of alerts to investigate of type t raised h time steps ago.
+  """
+  delta = []
+  for h in range(model.horizon):
+    delta.append([0]*len(model.alert_types))
+  remain_budget = model.def_budget
+  used_budget = 0.0
+
+  if model.def_budget == 20:
+    prio_profile, prob_profile, threshold = [[1, 3, 2], [3, 1, 2], [2, 3, 1]], [0.24, 0.48, 0.28], [1, 8, 18]
+  elif model.def_budget == 30:
+    prio_profile, prob_profile, threshold = [[1, 3, 2], [3, 1, 2], [2, 3, 1]], [0.6, 0.06, 0.34], [2, 11, 25]
+  elif model.def_budget == 40:
+    prio_profile, prob_profile, threshold = [[1, 3, 2], [3, 1, 2], [2, 3, 1]], [0.62, 0.25, 0.13], [4, 16, 23]
+  elif model.def_budget == 5:
+  	prio_profile, prob_profile, threshold = [[1, 2, 3]], [1.0], [0, 0, 63]
+  elif model.def_budget == 10:
+  	prio_profile, prob_profile, threshold = [[1, 2, 3]], [1.0], [0, 0, 63]
+  elif model.def_budget == 15:
+  	prio_profile, prob_profile, threshold = [[1, 3, 2], [3, 1, 2]], [0.73, 0.27], [0, 3, 63]
+
+  ind = np.random.choice(len(prio_profile), p=prob_profile)
+  alert_priority = np.array(prio_profile[ind]) 
+
+  for i in range(np.unique(alert_priority).shape[0]):
+    if remain_budget > 0:
+      index_priority = np.where(alert_priority == i+1)[0]
+      for j in index_priority:
+        delta[0][j] = min(int(remain_budget / index_priority.shape[0] / model.alert_types[j].cost), state.N[0][j], threshold[j])
+        used_budget += delta[0][j] * model.alert_types[j].cost
+      remain_budget = model.def_budget - used_budget
+    else:
+      break
+  return delta
+
 def test_attack_action(model, state):
   """
   Compute a basic attack action (i.e., probability of mouting attacks), which distributes the adversary's budget uniformly among attack types.
@@ -174,18 +207,24 @@ def test_attack_action(model, state):
   alpha = [min(budget / a.cost, 1) for a in model.attack_types]
   return alpha
 
+def test_attack_aics(model, state):
+  alpha = [0, 1, 0]
+  return alpha
+
 if __name__ == "__main__":
-  model = test_model_suricata(1000, 120)
+  model = test_model_fraud(20, 3)
   state = Model.State(model)
   #print(test_defense_action(model, state))
   #print(test_attack_action(model, state))
   i = 0
-  while i < 15:
+  while i < 10:
     print('#############################')
     print(i)
     print('state:', state)
-    print('defender:', test_defense_action(model, state))
-    print('attacker:', test_attack_action(model, state))
-    state = model.next_state(state, test_defense_newest, test_attack_action)
+    #print('defender:', test_defense_action(model, state))
+    #print('defender (feasible):', model.make_investigation_feasible(state.N, test_defense_aics(model, state)))
+    #print('attacker:', test_attack_action(model, state))
+    #print('attacker (feasible):', model.make_attack_feasible(test_attack_action(model, state)))
+    state = model.next_state('old', state, test_defense_icde, test_attack_action)
     i += 1
 
