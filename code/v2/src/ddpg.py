@@ -19,7 +19,7 @@ import random
 import scipy.stats as ss
 import sys
 import os 
-
+os.environ["TF_CPP_MIN_LOG_LEVEL"]='2'
 #####################  hyper parameters  ##############################
 
 MAX_EPISODES = config.getint('parameter', 'max_episodes')
@@ -47,7 +47,7 @@ MAX_TEST_STEPS = config.getint('parameter', 'max_test_steps')
 PRINT_STEP = config.getint('parameter', 'print_step')
 
 DATA = config.get('dataset', 'data')
-
+EXPLORATION = config.get('parameter', 'exploration')
 #########################################################################
 
 #config = tf.ConfigProto(allow_soft_placement=True)
@@ -209,10 +209,16 @@ class DDPGlearning:
                 if np.random.random() >= epsilon:
                     action = self.ddpg.choose_action(state) #action has been normalized by choos_action()
                 else:
-                    if self.mode == "defend":
-                        action = normalized([np.random.randint(0,5) for k in range(self.action_size)])
+                    if self.mode == 'defend':
+                        if EXPLORATION == 'discrete':
+                            action = normalized([np.random.randint(0,5) for k in range(self.action_size)])
+                        elif EXPLORATION == 'continuous':
+                            action = normalized([np.random.random() for k in range(self.action_size)])
                     else:
-                        action = [np.random.randint(0,5)*0.2 for k in range(self.action_size)]
+                        if EXPLORATION == 'discrete':                           
+                            action = [np.random.randint(0,5)*0.25 for k in range(self.action_size)]
+                        elif EXPLORATION == 'continuous':
+                            action = [np.random.random() for k in range(self.action_size)]
                     action = np.array(action)
                                 
                 # action plus a noise
@@ -262,7 +268,7 @@ class DDPGlearning:
         if TEST_EPISODES != 0:
             ave_reward = total_reward/TEST_EPISODES
             self.utility = ave_reward
-            #logging.info("Expected discount reward {}".format(ave_reward))
+            logging.info("RL utililty: {}".format(ave_reward))
 
         # DDPG test
         #logging.info("Non-strategic agents test starts.")
@@ -275,7 +281,7 @@ class DDPGlearning:
             op_action = op_actions[i]
             for j in range(MAX_TEST_STEPS):
                 if self.mode == "defend":
-                    action = np.array([1/self.action_size-0.00001 for k in range(self.action_size)], dtype=np.float32)
+                    action = np.array(normalized(test_defense_aics(model, global_state)[0]), dtype=np.float32)
                 else:
                     action = np.array(test_attack_action(model, state), dtype=np.float32)
                 (next_global_state, loss) = state_update(TEST_MODE, global_state, list(action), op_action)
@@ -288,7 +294,65 @@ class DDPGlearning:
             total_reward += episode_reward
         if TEST_EPISODES_NS != 0:
             ave_reward = total_reward/TEST_EPISODES_NS
-            #logging.info("Expected discount reward {}".format(ave_reward))
+            if self.mode == "defend":
+                logging.info("Non-strategic (AICS) utility: {}".format(ave_reward))
+            else:
+                logging.info("Non-strategic (Uniform) utility: {}".format(ave_reward))
+
+        # DDPG test
+        #logging.info("Non-strategic agents test starts.")
+        total_reward = 0
+        op_actions = np.random.choice(op_profile, TEST_EPISODES_NS, p=op_strategy)            
+        for i in range(TEST_EPISODES_NS):
+            global_state = initial_state
+            state = np.array(state_observe(global_state),dtype=np.float32)
+            episode_reward = 0.0
+            op_action = op_actions[i]
+            for j in range(MAX_TEST_STEPS):
+                if self.mode == "defend":
+                    action = np.array(normalized(test_defense_newest(model, global_state)[0]), dtype=np.float32)
+                else:
+                    action = np.array(test_attack_action(model, state), dtype=np.float32)
+                (next_global_state, loss) = state_update(TEST_MODE, global_state, list(action), op_action)
+                next_state = np.array(state_observe(next_global_state), dtype=np.float32)
+                global_state = next_global_state
+                state = next_state
+                step_reward = -1.0*loss
+                episode_reward += GAMMA**j*step_reward
+            #logging.info("Episode {}, Average reward in each step {}".format(i, episode_reward))
+            total_reward += episode_reward
+        if TEST_EPISODES_NS != 0:
+            ave_reward = total_reward/TEST_EPISODES_NS
+            logging.info("Non-strategic (Uniform) utility: {}".format(ave_reward))
+
+        # DDPG test
+        #logging.info("Non-strategic agents test starts.")
+        total_reward = 0
+        op_actions = np.random.choice(op_profile, TEST_EPISODES_NS, p=op_strategy)            
+        for i in range(TEST_EPISODES_NS):
+            global_state = initial_state
+            state = np.array(state_observe(global_state),dtype=np.float32)
+            episode_reward = 0.0
+            op_action = op_actions[i]
+            for j in range(MAX_TEST_STEPS):
+                if self.mode == "defend":
+                    action = np.array(normalized(test_defense_icde(model, global_state)[0]), dtype=np.float32)
+                else:
+                    action = np.array(test_attack_action(model, state), dtype=np.float32)
+                (next_global_state, loss) = state_update(TEST_MODE, global_state, list(action), op_action)
+                next_state = np.array(state_observe(next_global_state), dtype=np.float32)
+                global_state = next_global_state
+                state = next_state
+                step_reward = -1.0*loss
+                episode_reward += GAMMA**j*step_reward
+            #logging.info("Episode {}, Average reward in each step {}".format(i, episode_reward))
+            total_reward += episode_reward
+        if TEST_EPISODES_NS != 0:
+            ave_reward = total_reward/TEST_EPISODES_NS
+            if self.mode == "defend":
+                logging.info("Non-strategic (ICDE) utility: {}".format(ave_reward))
+            else:
+                logging.info("Non-strategic (Uniform) utility: {}".format(ave_reward))
 
     def policy(self, model, state):
         """
@@ -377,14 +441,15 @@ class AttackerOracle:
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s / %(levelname)s: %(message)s', level=logging.DEBUG)
     logging.info("Experiment starts.")
-    if len(sys.argv) < 6:
-        print("python ddpg_h1.py [model_name] [mode] [def_budget] [adv_budget] [n_experiment]")
+    if len(sys.argv) < 7:
+        print("python ddpg_h1.py [model_name] [mode]] [def_budget] [adv_budget] [n_experiment]  [opponent's policy")
         sys.exit(1)
     model_name = sys.argv[1]
     mode = sys.argv[2]
     def_budget = float(sys.argv[3])
     adv_budget = float(sys.argv[4])
     n_experiment = int(sys.argv[5])
+    opponent = sys.argv[6]
 
     if model_name == 'suricata':
         model = test_model_suricata(def_budget, adv_budget)
@@ -395,16 +460,25 @@ if __name__ == "__main__":
         np.random.seed(random_seed)
         tf.set_random_seed(random_seed)
         if mode == 'defend':
-            oracle = DefenderOracle(model, [test_attack_action], [1.0])
+            if opponent == 'uniform':
+                oracle = DefenderOracle(model, [test_attack_action], [1.0])
+            elif opponent == 'aics':
+                oracle = DefenderOracle(model, [test_attack_aics], [1.0])
         elif mode == 'attack':
-            oracle = AttackerOracle(model, [test_defense_newest], [1.0])
+            if opponent == 'uniform':
+                oracle = AttackerOracle(model, [test_defense_newest], [1.0])
+            elif opponent == 'aics':
+                oracle = AttackerOracle(model, [test_defense_aics], [1.0])
+            elif opponent == 'icde':
+                oracle = AttackerOracle(model, [test_defense_icde], [1.0])
         return oracle.agent.utility
 
     cores = multiprocessing.cpu_count()
     pool = multiprocessing.Pool(processes=cores)
 
     utilities = []
-    for utility in pool.imap(evaluation, range(n_experiment)):
+    for utility in pool.map(evaluation, range(n_experiment)):
         utilities.append(utility)
     logging.info("The utility of the agent:")
     print(utilities)
+    
